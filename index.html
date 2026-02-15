@@ -28,6 +28,218 @@
         </div>
     </div>
     <script src="script.js"></script>
+    <div class="upload-section" style="margin-top: 20px;">
+        <h2>Upload Video</h2>
+        <input type="file" id="videoInput" accept="video/*">
+        <button id="uploadBtn">Upload Video</button>
+
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar" id="progressBar">0%</div>
+        </div>
+
+        <div id="statusDisplay" style="margin-top: 20px; white-space: pre-wrap; background: #f0f0f0; padding: 10px;">
+        </div>
+
+        <div style="margin-top: 20px; border-top: 1px dashed #ccc; padding-top: 20px;">
+            <h3>Or Track Progress</h3>
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <input type="text" id="trackVideoId" placeholder="Enter Video ID to Track" style="margin-bottom: 0;">
+                <button id="trackBtn" style="background-color: #6c757d;">Track</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="result-section" style="margin-top: 20px; padding: 20px; border: 1px solid #ccc;">
+        <h2>Check Video Result</h2>
+        <input type="text" id="resultVideoId" placeholder="Enter Video ID">
+        <button id="getResultBtn">Get Result</button>
+        <div id="resultDisplay" style="margin-top: 20px; white-space: pre-wrap; background: #f0f0f0; padding: 10px;">
+        </div>
+    </div>
+
+    <script>
+        const uploadBtn = document.getElementById('uploadBtn');
+        const videoInput = document.getElementById('videoInput');
+        const statusDisplay = document.getElementById('statusDisplay');
+        const trackBtn = document.getElementById('trackBtn');
+        const trackVideoId = document.getElementById('trackVideoId');
+        let pollInterval;
+
+        trackBtn.addEventListener('click', () => {
+            const videoId = trackVideoId.value.trim();
+            if (!videoId) {
+                alert('Please enter a Video ID to track.');
+                return;
+            }
+            startPolling(videoId);
+        });
+
+        uploadBtn.addEventListener('click', async () => {
+            const file = videoInput.files[0];
+            if (!file) {
+                alert('Please select a video file first.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('video', file);
+
+            try {
+                statusDisplay.textContent = 'Uploading...';
+                const response = await fetch('http://localhost:3000/api/v1/videos/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Upload failed: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                console.log({ data });
+                statusDisplay.textContent = 'Upload successful! Job ID: ' + data?.data?.videoId; // Assuming backend returns jobId or videoId
+
+                // data might contain videoId directly or part of a job object. 
+                // adjusting based on user prompt: "pool /api/v1/videos/:videoId/status"
+                // and "success: true, data: { videoId: ... }" structure implies the upload response might have the id suitable for polling.
+                // standard implementation: response from upload usually gives the ID.
+                // I will assume the upload response gives { success: true, data: { videoId: "..." } } or similar.
+                // Let's log the upload response to be sure in the UI.
+
+                const videoId = data?.data?.videoId;
+
+                if (videoId) {
+                    startPolling(videoId);
+                } else {
+                    statusDisplay.textContent += '\nCould not find videoId in upload response: ' + JSON.stringify(data);
+                }
+
+            } catch (error) {
+                statusDisplay.textContent = 'Error: ' + error.message;
+                console.error('Upload error:', error);
+            }
+        });
+
+        function startPolling(videoId) {
+            if (pollInterval) clearInterval(pollInterval);
+
+            const progressContainer = document.getElementById('progressContainer');
+            const progressBar = document.getElementById('progressBar');
+
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+
+            statusDisplay.textContent = `\nStarting polling for videoId: ${videoId}...`;
+
+            pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`http://localhost:3000/api/v1/videos/${videoId}/status`);
+                    const result = await response.json();
+
+                    statusDisplay.textContent = `Status Check: ${new Date().toLocaleTimeString()}\n` +
+                        JSON.stringify(result, null, 2);
+
+                    if (result.success && result.data) {
+                        const { status, progress, error } = result.data;
+
+                        // Update Progress Bar
+                        const progressPercent = typeof progress === 'number' ? progress : 0;
+                        progressBar.style.width = `${progressPercent}%`;
+                        progressBar.textContent = `${Math.round(progressPercent)}%`;
+
+                        // Color coding based on status
+                        if (status === 'completed') {
+                            progressBar.style.backgroundColor = '#28a745'; // Green
+                            clearInterval(pollInterval);
+                            statusDisplay.textContent += '\n\nProcessing Completed!';
+                        } else if (status === 'failed') {
+                            progressBar.style.backgroundColor = '#dc3545'; // Red
+                            clearInterval(pollInterval);
+                            statusDisplay.textContent += `\n\nProcessing Failed: ${error}`;
+                        } else {
+                            progressBar.style.backgroundColor = '#007bff'; // Blue for processing
+                        }
+                    }
+                } catch (error) {
+                    statusDisplay.textContent += `\nPolling Error: ${error.message}`;
+                }
+            }, 2000); // Poll every 2 seconds
+        }
+
+        const getResultBtn = document.getElementById('getResultBtn');
+        const resultVideoId = document.getElementById('resultVideoId');
+        const resultDisplay = document.getElementById('resultDisplay');
+
+        getResultBtn.addEventListener('click', async () => {
+            const videoId = resultVideoId.value.trim();
+            if (!videoId) {
+                alert('Please enter a video ID.');
+                return;
+            }
+
+            try {
+                resultDisplay.innerHTML = '<p>Fetching result...</p>';
+                const response = await fetch(`http://localhost:3000/api/v1/videos/${videoId}/result`);
+
+                if (!response.ok) {
+                    throw new Error(`Error: ${response.statusText}`);
+                }
+
+                const json = await response.json();
+
+                if (json.success && json.data) {
+                    const data = json.data;
+                    const statusClass = data.status === 'completed' ? 'status-completed' :
+                        (data.status === 'failed' ? 'status-failed' : 'status-processing');
+
+                    const html = `
+                        <div class="result-card">
+                            <div class="result-item">
+                                <span class="result-label">Status:</span>
+                                <span class="status-badge ${statusClass}">${data.status}</span>
+                            </div>
+                            <div class="result-item">
+                                <span class="result-label">Video ID:</span>
+                                <span class="result-value">${data.videoId}</span>
+                            </div>
+                            <div class="result-item">
+                                <span class="result-label">Progress:</span>
+                                <span class="result-value">${data.progress}%</span>
+                            </div>
+                            <div class="result-item">
+                                <span class="result-label">Total Frames:</span>
+                                <span class="result-value">${data.totalFrames || 'N/A'}</span>
+                            </div>
+                            <div class="result-item">
+                                <span class="result-label">Processed Frames:</span>
+                                <span class="result-value">${data.processedFrames || 'N/A'}</span>
+                            </div>
+                             <div class="result-item">
+                                <span class="result-label">Created At:</span>
+                                <span class="result-value">${new Date(data.createdAt).toLocaleString()}</span>
+                            </div>
+                            ${data.error ? `
+                            <div class="result-item" style="border-bottom: none;">
+                                <span class="result-label" style="color: red;">Error:</span>
+                                <span class="result-value" style="color: red;">${data.error}</span>
+                            </div>` : ''}
+                        </div>
+                        <details style="margin-top: 10px; cursor: pointer;">
+                            <summary style="color: #007bff;">View Raw JSON</summary>
+                            <pre style="background: #eee; padding: 10px; border-radius: 4px; overflow-x: auto; margin-top: 5px;">${JSON.stringify(json, null, 2)}</pre>
+                        </details>
+                    `;
+                    resultDisplay.innerHTML = html;
+                } else {
+                    resultDisplay.innerHTML = `<p>No data found or request failed.</p><pre>${JSON.stringify(json, null, 2)}</pre>`;
+                }
+
+            } catch (error) {
+                resultDisplay.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        });
+    </script>
 </body>
 
 </html>
